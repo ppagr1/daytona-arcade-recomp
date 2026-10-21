@@ -1,3 +1,6 @@
+//#include <cstdio>
+//above is new
+
 #include "app/controls.h"
 
 #include <algorithm>
@@ -60,12 +63,22 @@ PadInput PadInput::parse(const std::string &s) {
 
 void Devices::handle_event(const SDL_Event &e) {
     switch (e.type) {
-    case SDL_EVENT_JOYSTICK_ADDED:
-        if (SDL_Joystick *j = SDL_OpenJoystick(e.jdevice.which)) { // our own reference (a gamepad holds another)
-            if (std::find(joys.begin(), joys.end(), j) == joys.end()) joys.push_back(j);
-            else SDL_CloseJoystick(j);
-        }
-        break;
+case SDL_EVENT_JOYSTICK_ADDED:
+    if (SDL_Joystick *j = SDL_OpenJoystick(e.jdevice.which)) {
+
+//        printf(
+ //            "OPENED id=%u name=%s\n",
+  //           (unsigned)SDL_GetJoystickID(j),
+   //           SDL_GetJoystickName(j)
+    //       );
+
+        // our own reference (a gamepad holds another)
+        if (std::find(joys.begin(), joys.end(), j) == joys.end())
+            joys.push_back(j);
+        else
+            SDL_CloseJoystick(j);
+    }
+    break;
     case SDL_EVENT_JOYSTICK_REMOVED:
         for (auto it = joys.begin(); it != joys.end(); ++it)
             if (SDL_GetJoystickID(*it) == e.jdevice.which) {
@@ -80,6 +93,14 @@ void Devices::handle_event(const SDL_Event &e) {
     case SDL_EVENT_GAMEPAD_REMOVED:
         if (pad && e.gdevice.which == SDL_GetGamepadID(pad)) SDL_CloseGamepad(pad), pad = nullptr;
         break;
+//case SDL_EVENT_JOYSTICK_AXIS_MOTION:
+ //   printf(
+  //      "EVENT id=%u axis=%d value=%d\n",
+   //     (unsigned)e.jaxis.which,
+    //    e.jaxis.axis,
+     //   e.jaxis.value
+      //);
+       //break;
     default: break;
     }
 }
@@ -99,24 +120,45 @@ std::string guid_string(SDL_Joystick *j) {
 } // namespace
 
 SDL_Joystick *Devices::find(const std::string &guid) const {
-    for (SDL_Joystick *j : joys)
-        if (guid_string(j) == guid) return j;
+    for (auto it = joys.rbegin(); it != joys.rend(); ++it) {
+        SDL_Joystick *j = *it;
+        if (guid_string(j) == guid)
+            return j;
+    }
     return nullptr;
 }
 
+
 float JoyInput::value(const Devices &d, float deadzone) const {
-    if (kind == None) return 0.f;
+    if (kind == None)
+        return 0.f;
+
     SDL_Joystick *j = d.find(guid);
-    if (!j) return 0.f;
+    if (!j)
+        return 0.f;
+
     switch (kind) {
-    case Button: return SDL_GetJoystickButton(j, index) ? 1.f : 0.f;
-    case Hat: return (SDL_GetJoystickHat(j, index) & mask) ? 1.f : 0.f;
+    case Button:
+        return SDL_GetJoystickButton(j, index) ? 1.f : 0.f;
+
+    case Hat:
+        return (SDL_GetJoystickHat(j, index) & mask) ? 1.f : 0.f;
+
     case Axis: {
-        if (full == rest) return 0.f;
-        const float x = std::clamp(float(SDL_GetJoystickAxis(j, index) - rest) / float(full - rest), 0.f, 1.f);
+        if (full == rest)
+            return 0.f;
+
+        const int raw = SDL_GetJoystickAxis(j, index);
+
+        const float x = std::clamp(
+            float(raw - rest) / float(full - rest),
+            0.f, 1.f);
+
         return x <= deadzone ? 0.f : (x - deadzone) / (1.f - deadzone);
     }
-    default: return 0.f;
+
+    default:
+        return 0.f;
     }
 }
 
@@ -184,7 +226,6 @@ void Controls::set_defaults() {
     b(Service, SDL_SCANCODE_F3, PadInput::None, 0);
     deadzone = 0.08f;
     joy_deadzone = 0.02f;
-    wheel_sensitivity = 1.0f;
     steer_invert = false;
 }
 
@@ -199,14 +240,7 @@ float Controls::value(Action a, const bool *keys, const Devices &d) const {
         x = x <= deadzone ? 0.f : (x - deadzone) / (1.f - deadzone); // rescale past the dead zone: full travel still reaches 1
         v = std::max(v, x);
     }
-    float joy = b.joy.value(d, joy_deadzone);
-    if ((a == SteerLeft || a == SteerRight) && b.joy.kind == JoyInput::Axis) {
-        const float sensitivity = std::isfinite(wheel_sensitivity)
-            ? std::clamp(wheel_sensitivity, 0.25f, 3.0f) : 1.0f;
-        // Apply after calibration/dead zone, preserving centre and full lock.
-        if (sensitivity != 1.0f) joy = std::pow(joy, 1.0f / sensitivity);
-    }
-    return std::max({v, joy, touch[a]});
+    return std::max({v, b.joy.value(d, joy_deadzone), touch[a]});
 }
 
 bool Controls::analog_source(Action a, const Devices &d) const {
